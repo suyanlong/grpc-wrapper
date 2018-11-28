@@ -1,12 +1,32 @@
 Changes by Version
 ==================
 
+2.15.0 (2018-10-10)
+-------------------
+
+- Fix FollowsFrom spans ignoring baggage/debug header from dummy parent context (#313) <Zvi Cahana>
+- Make maximum annotation length configurable in tracer options (#318) <Eric Chang>
+- Support more environment variables in configuration (#323) <Daneyon Hansen>
+- Print error on Sampler Query failure (#328) <Goutham Veeramachaneni>
+- Add an HTTPOption to support custom http.RoundTripper (#333) <Michael Puncel>
+- Return an error when an HTTP error code is seen in zipkin HTTP transport <Michael Puncel>
+
+
+2.14.0 (2018-04-30)
+-------------------
+
+- Support throttling for debug traces (#274) <Isaac Hier>
+- Remove dependency on Apache Thrift (#303) <Yuri Shkuro>
+- Remove dependency on tchannel  (#295) (#294) <Yuri Shkuro>
+- Test with Go 1.9 (#298) <Yuri Shkuro>
+
+
 2.13.0 (2018-04-15)
 -------------------
 
 - Use value receiver for config.NewTracer() (#283) <Yuri Shkuro>
 - Lock span during jaeger thrift conversion (#273) <Won Jun Jang>
-- Fix the RemotelyControlledSampler so that it terminates go-routine on Close() (#260) (11 days ago) <Scott Kidder> <Yuri Shkuro>
+- Fix the RemotelyControlledSampler so that it terminates go-routine on Close() (#260) <Scott Kidder> <Yuri Shkuro>
 - Added support for client configuration via env vars (#275) <Juraci Paixão Kröhling>
 - Allow overriding sampler in the Config (#270) <Mike Kabischev>
 

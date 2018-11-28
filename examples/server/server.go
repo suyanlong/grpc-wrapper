@@ -34,7 +34,7 @@ func (s *grpcserver) SayHello(ctx context.Context, in *pb.HelloRequest) (*pb.Hel
 			mysqlSpan := tracer.StartSpan("FindUserTable", opentracing.ChildOf(pctx))
 
 			//do mysql operations
-			time.Sleep(time.Millisecond * 100)
+			time.Sleep(time.Second * 10)
 
 			defer mysqlSpan.Finish()
 		}
@@ -53,7 +53,7 @@ func NewJaegerTracer(serviceName string) (tracer opentracing.Tracer, closer io.C
 		Reporter: &jaegerCfg.ReporterConfig{
 			LogSpans:            true,
 			BufferFlushInterval: 1 * time.Second,
-			LocalAgentHostPort:  "192.168.1.105:6831",
+			LocalAgentHostPort:  "127.0.0.1:6831",
 		},
 	}
 	tracer, closer, err = cfg.New(

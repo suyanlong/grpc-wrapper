@@ -1,4 +1,4 @@
-// Copyright (c) 2017 Uber Technologies, Inc.
+// Copyright (c) 2017-2018 Uber Technologies, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,9 @@ import (
 
 	"github.com/uber/jaeger-client-go"
 	"github.com/uber/jaeger-client-go/internal/baggage/remote"
+	throttler "github.com/uber/jaeger-client-go/internal/throttler/remote"
 	"github.com/uber/jaeger-client-go/rpcmetrics"
+	"github.com/uber/jaeger-client-go/transport"
 )
 
 const defaultSamplingProbability = 0.001
@@ -49,6 +51,7 @@ type Configuration struct {
 	Reporter            *ReporterConfig            `yaml:"reporter"`
 	Headers             *jaeger.HeadersConfig      `yaml:"headers"`
 	BaggageRestrictions *BaggageRestrictionsConfig `yaml:"baggage_restrictions"`
+	Throttler           *ThrottlerConfig           `yaml:"throttler"`
 }
 
 // SamplerConfig allows initializing a non-default sampler.  All fields are optional.
@@ -106,6 +109,18 @@ type ReporterConfig struct {
 	// LocalAgentHostPort instructs reporter to send spans to jaeger-agent at this address
 	// Can be set by exporting an environment variable named JAEGER_AGENT_HOST / JAEGER_AGENT_PORT
 	LocalAgentHostPort string `yaml:"localAgentHostPort"`
+
+	// CollectorEndpoint instructs reporter to send spans to jaeger-collector at this URL
+	// Can be set by exporting an environment variable named JAEGER_ENDPOINT
+	CollectorEndpoint string `yaml:"collectorEndpoint"`
+
+	// User instructs reporter to include a user for basic http authentication when sending spans to jaeger-collector.
+	// Can be set by exporting an environment variable named JAEGER_USER
+	User string `yaml:"user"`
+
+	// Password instructs reporter to include a password for basic http authentication when sending spans to
+	// jaeger-collector. Can be set by exporting an environment variable named JAEGER_PASSWORD
+	Password string `yaml:"password"`
 }
 
 // BaggageRestrictionsConfig configures the baggage restrictions manager which can be used to whitelist
@@ -123,6 +138,24 @@ type BaggageRestrictionsConfig struct {
 	// RefreshInterval controls how often the baggage restriction manager will poll
 	// jaeger-agent for the most recent baggage restrictions.
 	RefreshInterval time.Duration `yaml:"refreshInterval"`
+}
+
+// ThrottlerConfig configures the throttler which can be used to throttle the
+// rate at which the client may send debug requests.
+type ThrottlerConfig struct {
+	// HostPort of jaeger-agent's credit server.
+	HostPort string `yaml:"hostPort"`
+
+	// RefreshInterval controls how often the throttler will poll jaeger-agent
+	// for more throttling credits.
+	RefreshInterval time.Duration `yaml:"refreshInterval"`
+
+	// SynchronousInitialization determines whether or not the throttler should
+	// synchronously fetch credits from the agent when an operation is seen for
+	// the first time. This should be set to true if the client will be used by
+	// a short lived service that needs to ensure that credits are fetched
+	// upfront such that sampling or throttling occurs.
+	SynchronousInitialization bool `yaml:"synchronousInitialization"`
 }
 
 type nullCloser struct{}
@@ -198,6 +231,7 @@ func (c Configuration) NewTracer(options ...Option) (opentracing.Tracer, io.Clos
 		jaeger.TracerOptions.CustomHeaderKeys(c.Headers),
 		jaeger.TracerOptions.Gen128Bit(opts.gen128Bit),
 		jaeger.TracerOptions.ZipkinSharedRPCSpan(opts.zipkinSharedRPCSpan),
+		jaeger.TracerOptions.MaxTagValueLength(opts.maxTagValueLength),
 	}
 
 	for _, tag := range opts.tags {
@@ -236,6 +270,21 @@ func (c Configuration) NewTracer(options ...Option) (opentracing.Tracer, io.Clos
 			),
 		)
 		tracerOptions = append(tracerOptions, jaeger.TracerOptions.BaggageRestrictionManager(mgr))
+	}
+
+	if c.Throttler != nil {
+		debugThrottler := throttler.NewThrottler(
+			c.ServiceName,
+			throttler.Options.Metrics(tracerMetrics),
+			throttler.Options.Logger(opts.logger),
+			throttler.Options.HostPort(c.Throttler.HostPort),
+			throttler.Options.RefreshInterval(c.Throttler.RefreshInterval),
+			throttler.Options.SynchronousInitialization(
+				c.Throttler.SynchronousInitialization,
+			),
+		)
+
+		tracerOptions = append(tracerOptions, jaeger.TracerOptions.DebugThrottler(debugThrottler))
 	}
 
 	tracer, closer := jaeger.NewTracer(
@@ -309,7 +358,7 @@ func (sc *SamplerConfig) NewSampler(
 	return nil, fmt.Errorf("Unknown sampler type %v", sc.Type)
 }
 
-// NewReporter instantiates a new reporter that submits spans to tcollector
+// NewReporter instantiates a new reporter that submits spans to the collector
 func (rc *ReporterConfig) NewReporter(
 	serviceName string,
 	metrics *jaeger.Metrics,
@@ -333,5 +382,13 @@ func (rc *ReporterConfig) NewReporter(
 }
 
 func (rc *ReporterConfig) newTransport() (jaeger.Transport, error) {
-	return jaeger.NewUDPTransport(rc.LocalAgentHostPort, 0)
+	switch {
+	case rc.CollectorEndpoint != "" && rc.User != "" && rc.Password != "":
+		return transport.NewHTTPTransport(rc.CollectorEndpoint, transport.HTTPBatchSize(1),
+			transport.HTTPBasicAuth(rc.User, rc.Password)), nil
+	case rc.CollectorEndpoint != "":
+		return transport.NewHTTPTransport(rc.CollectorEndpoint, transport.HTTPBatchSize(1)), nil
+	default:
+		return jaeger.NewUDPTransport(rc.LocalAgentHostPort, 0)
+	}
 }
